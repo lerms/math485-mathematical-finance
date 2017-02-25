@@ -118,3 +118,10 @@ def main():
 if __name__ == '__main__':
     main()
 
+r = InterestRate(0.12, short_term=False)
+european_call = EuropeanVanillaModel(20, 21, .5, 1.1, .9, r, n_periods=2, option='call')
+european_call.price()
+
+r = InterestRate(0.04, short_term=True)
+european_put = EuropeanVanillaModel(80, 100, 2, 1.2, .8, r, 2, option='put')
+european_put.price()
