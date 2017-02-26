@@ -16,4 +16,4 @@ or just look at the output on github
 
 if you want to run the command line interface using your own arguments use:
 
-python binomial.py
+python main.py
