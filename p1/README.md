@@ -7,7 +7,7 @@ The <b>src</b> directory consists of:
 
 <h3>Setup</h3>
 
-It is recommended to have the Anaconda installed.
+It is recommended to have Anaconda installed.
 
 You can get it here: https://docs.continuum.io/anaconda/install
 
