@@ -19,7 +19,7 @@ Anaconda installs Python 3, Jupyter Notebook, and lots of other useful open sour
 
 If you have Jupyter installed you can look at the notebook example with:
 
-jupyter notebook
+`jupyter notebook`
 
 then open binomial.ipynb
 
@@ -29,4 +29,4 @@ or just look at the output on github
 
 If you want to run the command line interface using your own arguments use:
 
-python main.py
+`python main.py`
