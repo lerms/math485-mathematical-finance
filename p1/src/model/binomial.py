@@ -2,67 +2,40 @@ import numpy as np
 from abc import ABC, abstractmethod
 
 
-class InterestRate:
-    def __init__(self, rate, short_term=False):
-        """
-        :param rate: a given yearly or short-term interest rate
-        :param short_term: set this to True if using a short-term interest rate
-         yearly interest rate is the interest rate for a full year
-         short-term interest rate is the rate between periods
-        """
-        self.rate = rate
-        self.short_term = short_term
-
-    def __str__(self):
-        return str(self.__dict__)
-
-    def __repr__(self):
-        return self.__str__()
-
-
 class BinomialModel(ABC):
     """
     Abstract class for any Binomial Model.
     All classes that inherit from BinomialModel must implement
-    stock_tree(), payoff(), derivative_tree(), and price() methods.
+    self.stock_tree(), self.payoff(), self.option_tree(), and self.price() methods.
     """
 
-    def __init__(self, s0, K, T, u, d, r, n_periods, option):
+    def __init__(self, s0, K, T, dt, u, d, r, n, option):
         """
         :param s0: initial stock price
         :param K: strike price
         :param T: duration
+        :param dt: delta-T (∆T)
         :param u: up-factor
         :param d: down-factor
-        :param r: interest rate, must be an InterestRate object
-        :param n_periods: height of the binomial tree
+        :param r: interest rate
+        :param n: height of the binomial tree, number of steps
         :param option: 'put' or 'call'
         """
         self.s0 = s0
         self.K = K
         self.T = T
+        self.dt = dt
         self.u = u
         self.d = d
         self.r = r
-        self.n = n_periods
+        self.n = n
         self.option = option
-        self.compute_dt()
         self.compute_probabilities()
-
-    def compute_dt(self):
-        """
-        First checks if the given interest rate is short_term. If that's the case,
-        ∆T is 1 and there is no need to compute it.
-
-        :return: delta T (∆T)
-        """
-        if self.r.short_term:
-            self.dt = 1
-        else:
-            self.dt = self.T / self.n
+        self.stock_tree()
+        self.option_tree()
 
     def compute_probabilities(self):
-        self.p = (np.exp(self.r.rate * self.dt) - self.d) / (self.u - self.d)
+        self.p = (np.exp(self.r * self.dt) - self.d) / (self.u - self.d)
         self.q = 1 - self.p
 
 
@@ -70,7 +43,7 @@ class BinomialModel(ABC):
     def stock_tree(self):
         """
         Computes the binomial tree of up and down stock prices.
-        Use the returned tree as parameter for derivative_tree function.
+        Use the returned tree as parameter for option_tree function.
 
         :return np array with shape (self.n + 1, self.n + 1) containing stock prices
         """
@@ -87,10 +60,10 @@ class BinomialModel(ABC):
         pass
 
     @abstractmethod
-    def derivative_tree(self, stock_tree):
+    def option_tree(self):
         """
-        using stock_tree, computes the option price
-        :param stock_tree:
+        using self.stock_tree, computes the option price
+        :param self.stock_tree:
         :return: np array with shape (self.n + 1, self.n + 1) containing derivative prices
         """
         pass
@@ -98,7 +71,7 @@ class BinomialModel(ABC):
     @abstractmethod
     def price(self):
         """
-        Using the stock_tree and derivative_tree functions,
+        Using the computed self.stock_tree and option_tree,
         finds the optimal price of the option at time 0.
         :return: optimal option price at time 0
         """
@@ -112,15 +85,14 @@ class BinomialModel(ABC):
 
 
 class EuropeanVanillaModel(BinomialModel):
-
     def stock_tree(self):
-        stock_tree = np.zeros((self.n + 1, self.n + 1))
-        stock_tree[0, 0] = self.s0
+        self.s_tree = np.empty((self.n + 1, self.n + 1))
+        self.s_tree[:] = np.nan
+        self.s_tree[0, 0] = self.s0
         for i in range(1, self.n + 1):
-            stock_tree[i, 0] = stock_tree[i - 1, 0] * self.u
+            self.s_tree[i, 0] = self.s_tree[i - 1, 0] * self.u
             for j in range(1, i + 1):
-                stock_tree[i, j] = stock_tree[i - 1, j - 1] * self.d
-        return stock_tree
+                self.s_tree[i, j] = self.s_tree[i - 1, j - 1] * self.d
 
     def payoff(self, st):
         if self.option == 'put':
@@ -129,45 +101,43 @@ class EuropeanVanillaModel(BinomialModel):
             return max(st - self.K, 0)
         raise Exception('option must be put or call, you entered:', self.option)
 
-    def derivative_tree(self, stock_tree):
-        d_tree = np.zeros((self.n + 1, self.n + 1))
+    def option_tree(self):
+        self.o_tree = np.empty((self.n + 1, self.n + 1))
+        self.o_tree[:] = np.nan
         for i in range(self.n + 1):
-            d_tree[self.n, i] = self.payoff(stock_tree[self.n, i])
+            self.o_tree[self.n, i] = self.payoff(self.s_tree[self.n, i])
 
-        exp = np.exp(-1 * self.r.rate * self.dt)
+        exp = np.exp(-1 * self.r * self.dt)
         for i in range(self.n - 1, -1, -1):
             for j in range(i + 1):
-                d_tree[i, j] = exp * (self.p * d_tree[i + 1, j] + self.q * d_tree[i + 1, j + 1])
-        return d_tree
+                self.o_tree[i, j] = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
 
     def price(self):
-        s_tree = self.stock_tree()
-        d_tree = self.derivative_tree(s_tree)
-        return d_tree[0, 0]
+        return self.o_tree[0,0]
 
 
 class AmericanModel(EuropeanVanillaModel):
     """
     Same as EuropeanVanillaModel, but need to account for early execution at each node
-    when computing derivative_tree.
+    when computing option_tree.
     """
 
-    def derivative_tree(self, stock_tree):
+    def option_tree(self):
         """
         American options can be executed early. At each node,
         the price of the derivative is max(vn, payoff(Sn)).
-        :param stock_tree:
+        :param self.stock_tree:
         :return: optimal value at t=0
         """
-        d_tree = np.zeros((self.n + 1, self.n + 1))
+        self.o_tree = np.empty((self.n + 1, self.n + 1))
+        self.o_tree[:] = np.nan
         for i in range(self.n + 1):
-            d_tree[self.n, i] = self.payoff(stock_tree[self.n, i])
+            self.o_tree[self.n, i] = self.payoff(self.s_tree[self.n, i])
 
-        exp = np.exp(-1 * self.r.rate * self.dt)
+        exp = np.exp(-1 * self.r * self.dt)
         for i in range(self.n - 1, -1, -1):
             for j in range(i + 1):
-                vn = exp * (self.p * d_tree[i + 1, j] + self.q * d_tree[i + 1, j + 1])
-                early_execution = self.payoff(stock_tree[i, j])
-                d_tree[i, j] = max(vn, early_execution)
-        return d_tree
-
+                vn = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
+                early_execution = self.payoff(self.s_tree[i, j])
+                self.o_tree[i, j] = max(vn, early_execution)
+        return self.o_tree
