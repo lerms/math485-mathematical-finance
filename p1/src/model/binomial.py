@@ -5,8 +5,7 @@ from abc import ABC, abstractmethod
 class BinomialModel(ABC):
     """
     Abstract class for any Binomial Model.
-    All classes that inherit from BinomialModel must implement
-    self.stock_tree(), self.payoff(), self.option_tree(), and self.price() methods.
+    All classes that inherit from BinomialModel must implement its methods
     """
 
     def __init__(self, s0, K, T, dt, u, d, r, n_steps, option):
@@ -30,6 +29,8 @@ class BinomialModel(ABC):
         self.r = r
         self.n_steps = n_steps
         self.option = option
+        self.s_tree = None
+        self.o_tree = None
         self.build()
 
     @abstractmethod
@@ -40,9 +41,8 @@ class BinomialModel(ABC):
     def compute_probabilities(self):
         pass
 
-
     @abstractmethod
-    def stock_tree(self):
+    def compute_stock_tree(self):
         """
         Computes the binomial tree of up and down stock prices.
         Use the returned tree as parameter for option_tree function.
@@ -62,7 +62,7 @@ class BinomialModel(ABC):
         pass
 
     @abstractmethod
-    def option_tree(self):
+    def compute_option_tree(self):
         """
         using self.stock_tree, computes the option price
         :param self.stock_tree:
@@ -87,17 +87,16 @@ class BinomialModel(ABC):
 
 
 class EuropeanVanillaModel(BinomialModel):
-
     def build(self):
         self.compute_probabilities()
-        self.stock_tree()
-        self.option_tree()
+        self.compute_stock_tree()
+        self.compute_option_tree()
 
     def compute_probabilities(self):
         self.p = (np.exp(self.r * self.dt) - self.d) / (self.u - self.d)
         self.q = 1 - self.p
 
-    def stock_tree(self):
+    def compute_stock_tree(self):
         self.s_tree = np.empty((self.n_steps + 1, self.n_steps + 1))
         self.s_tree[:] = np.nan
         self.s_tree[0, 0] = self.s0
@@ -111,9 +110,9 @@ class EuropeanVanillaModel(BinomialModel):
             return max(self.K - st, 0)
         if self.option == 'call':
             return max(st - self.K, 0)
-        raise Exception('option must be put or call, you entered:', self.option)
+        raise ValueError('option must be put or call, you entered:', self.option)
 
-    def option_tree(self):
+    def compute_option_tree(self):
         self.o_tree = np.empty((self.n_steps + 1, self.n_steps + 1))
         self.o_tree[:] = np.nan
         for i in range(self.n_steps + 1):
@@ -125,7 +124,7 @@ class EuropeanVanillaModel(BinomialModel):
                 self.o_tree[i, j] = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
 
     def price(self):
-        return self.o_tree[0,0]
+        return self.o_tree[0, 0]
 
 
 class AmericanModel(EuropeanVanillaModel):
@@ -134,12 +133,10 @@ class AmericanModel(EuropeanVanillaModel):
     when computing option_tree.
     """
 
-    def option_tree(self):
+    def compute_option_tree(self):
         """
         American options can be executed early. At each node,
         the price of the derivative is max(vn, payoff(Sn)).
-        :param self.stock_tree:
-        :return: optimal value at t=0
         """
         self.o_tree = np.empty((self.n_steps + 1, self.n_steps + 1))
         self.o_tree[:] = np.nan
@@ -152,15 +149,19 @@ class AmericanModel(EuropeanVanillaModel):
                 vn = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
                 early_execution = self.payoff(self.s_tree[i, j])
                 self.o_tree[i, j] = max(vn, early_execution)
-        return self.o_tree
 
 
-class HullWhite(ABC):
-
+class HullWhiteModel(ABC):
     def __init__(self, K, T, dt, r, n_steps, option, n_training, stock_prices, s0=None):
         """
-           :param n_training: number of training docs
-           :param stock_prices: a DataFrame containing stock prices with ratios
+            :param K: strike price
+            :param T: duration
+            :param dt: delta-T (∆T)
+            :param r: interest rate
+            :param n_steps: height of the binomial tree, number of steps
+            :param option: 'put' or 'call'
+            :param n_training: number of training docs
+            :param stock_prices: a DataFrame containing stock prices with computed ratios
         """
         self.s0 = s0
         self.K = K
@@ -171,59 +172,44 @@ class HullWhite(ABC):
         self.option = option
         self.n_training = n_training
         self.stock_prices = stock_prices
+        self.binomial = None
         self.build()
 
     def compute_factors(self):
-        self.mean = self.stock_prices['Ratio'][:self.n_training].mean()
-        self.stdev = self.stock_prices['Ratio'][:self.n_training].std()
+        self.mean = np.nanmean(self.stock_prices['Ratio'][:self.n_training])
+        self.sigma = np.nanstd(self.stock_prices['Ratio'][:self.n_training])
         U = self.mean - 1
-        self.u = 1 + (U * self.dt) + (self.stdev * np.sqrt(self.dt))
-        self.d = 1 + (U * self.dt) - (self.stdev * np.sqrt(self.dt))
+        self.u = 1 + (U * self.dt) + (self.sigma * np.sqrt(self.dt))
+        self.d = 1 + (U * self.dt) - (self.sigma * np.sqrt(self.dt))
+
+    def price(self):
+        return self.binomial.price()
 
     @abstractmethod
     def build(self):
         pass
 
 
-class HullWhiteEuropeanModel(HullWhite):
-
+class HullWhiteEuropeanModel(HullWhiteModel):
     def build(self):
         if self.s0 is None:
-            self.s0 = self.stock_prices['Close'][self.n_training]
+            if self.n_training < len(self.stock_prices['Close']):
+                self.s0 = self.stock_prices['Close'][self.n_training]
+            else:
+                raise IndexError('Could not assign s0 to first non training stock price')
+
         self.compute_factors()
         self.binomial = EuropeanVanillaModel(
             self.s0, self.K, self.T, self.dt, self.u, self.d, self.r, self.n_steps, self.option)
 
-    def price(self):
-        return self.binomial.price()
 
-
-class HullWhiteAmericanModel(HullWhite):
+class HullWhiteAmericanModel(HullWhiteModel):
     def build(self):
         if self.s0 is None:
-            self.s0 = self.stock_prices['Close'][self.n_training]
+            if self.n_training < len(self.stock_prices['Close']):
+                self.s0 = self.stock_prices['Close'][self.n_training]
+            else:
+                raise IndexError('Could not assign s0 to first non training stock price')
         self.compute_factors()
         self.binomial = AmericanModel(
             self.s0, self.K, self.T, self.dt, self.u, self.d, self.r, self.n_steps, self.option)
-
-    def price(self):
-        return self.binomial.price()
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
