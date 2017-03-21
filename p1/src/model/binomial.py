@@ -147,8 +147,7 @@ class AmericanModel(EuropeanVanillaModel):
         for i in range(self.n_steps - 1, -1, -1):
             for j in range(i + 1):
                 vn = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
-                early_execution = self.payoff(self.s_tree[i, j])
-                self.o_tree[i, j] = max(vn, early_execution)
+                self.o_tree[i, j] = max(vn, self.payoff(self.s_tree[i, j]))
 
 
 class HullWhiteModel(ABC):
