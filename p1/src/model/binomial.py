@@ -9,7 +9,7 @@ class BinomialModel(ABC):
     self.stock_tree(), self.payoff(), self.option_tree(), and self.price() methods.
     """
 
-    def __init__(self, s0, K, T, dt, u, d, r, n, option):
+    def __init__(self, s0, K, T, dt, u, d, r, n_steps, option):
         """
         :param s0: initial stock price
         :param K: strike price
@@ -18,7 +18,7 @@ class BinomialModel(ABC):
         :param u: up-factor
         :param d: down-factor
         :param r: interest rate
-        :param n: height of the binomial tree, number of steps
+        :param n_steps: height of the binomial tree, number of steps
         :param option: 'put' or 'call'
         """
         self.s0 = s0
@@ -28,15 +28,17 @@ class BinomialModel(ABC):
         self.u = u
         self.d = d
         self.r = r
-        self.n = n
+        self.n_steps = n_steps
         self.option = option
-        self.compute_probabilities()
-        self.stock_tree()
-        self.option_tree()
+        self.build()
 
+    @abstractmethod
+    def build(self):
+        pass
+
+    @abstractmethod
     def compute_probabilities(self):
-        self.p = (np.exp(self.r * self.dt) - self.d) / (self.u - self.d)
-        self.q = 1 - self.p
+        pass
 
 
     @abstractmethod
@@ -85,11 +87,21 @@ class BinomialModel(ABC):
 
 
 class EuropeanVanillaModel(BinomialModel):
+
+    def build(self):
+        self.compute_probabilities()
+        self.stock_tree()
+        self.option_tree()
+
+    def compute_probabilities(self):
+        self.p = (np.exp(self.r * self.dt) - self.d) / (self.u - self.d)
+        self.q = 1 - self.p
+
     def stock_tree(self):
-        self.s_tree = np.empty((self.n + 1, self.n + 1))
+        self.s_tree = np.empty((self.n_steps + 1, self.n_steps + 1))
         self.s_tree[:] = np.nan
         self.s_tree[0, 0] = self.s0
-        for i in range(1, self.n + 1):
+        for i in range(1, self.n_steps + 1):
             self.s_tree[i, 0] = self.s_tree[i - 1, 0] * self.u
             for j in range(1, i + 1):
                 self.s_tree[i, j] = self.s_tree[i - 1, j - 1] * self.d
@@ -102,13 +114,13 @@ class EuropeanVanillaModel(BinomialModel):
         raise Exception('option must be put or call, you entered:', self.option)
 
     def option_tree(self):
-        self.o_tree = np.empty((self.n + 1, self.n + 1))
+        self.o_tree = np.empty((self.n_steps + 1, self.n_steps + 1))
         self.o_tree[:] = np.nan
-        for i in range(self.n + 1):
-            self.o_tree[self.n, i] = self.payoff(self.s_tree[self.n, i])
+        for i in range(self.n_steps + 1):
+            self.o_tree[self.n_steps, i] = self.payoff(self.s_tree[self.n_steps, i])
 
         exp = np.exp(-1 * self.r * self.dt)
-        for i in range(self.n - 1, -1, -1):
+        for i in range(self.n_steps - 1, -1, -1):
             for j in range(i + 1):
                 self.o_tree[i, j] = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
 
@@ -129,15 +141,89 @@ class AmericanModel(EuropeanVanillaModel):
         :param self.stock_tree:
         :return: optimal value at t=0
         """
-        self.o_tree = np.empty((self.n + 1, self.n + 1))
+        self.o_tree = np.empty((self.n_steps + 1, self.n_steps + 1))
         self.o_tree[:] = np.nan
-        for i in range(self.n + 1):
-            self.o_tree[self.n, i] = self.payoff(self.s_tree[self.n, i])
+        for i in range(self.n_steps + 1):
+            self.o_tree[self.n_steps, i] = self.payoff(self.s_tree[self.n_steps, i])
 
         exp = np.exp(-1 * self.r * self.dt)
-        for i in range(self.n - 1, -1, -1):
+        for i in range(self.n_steps - 1, -1, -1):
             for j in range(i + 1):
                 vn = exp * (self.p * self.o_tree[i + 1, j] + self.q * self.o_tree[i + 1, j + 1])
                 early_execution = self.payoff(self.s_tree[i, j])
                 self.o_tree[i, j] = max(vn, early_execution)
         return self.o_tree
+
+
+class HullWhite(ABC):
+
+    def __init__(self, K, T, dt, r, n_steps, option, n_training, stock_prices, s0=None):
+        """
+           :param n_training: number of training docs
+           :param stock_prices: a DataFrame containing stock prices with ratios
+        """
+        self.s0 = s0
+        self.K = K
+        self.T = T
+        self.dt = dt
+        self.r = r
+        self.n_steps = n_steps
+        self.option = option
+        self.n_training = n_training
+        self.stock_prices = stock_prices
+        self.build()
+
+    def compute_factors(self):
+        self.mean = self.stock_prices['Ratio'][:self.n_training].mean()
+        self.stdev = self.stock_prices['Ratio'][:self.n_training].std()
+        U = self.mean - 1
+        self.u = 1 + (U * self.dt) + (self.stdev * np.sqrt(self.dt))
+        self.d = 1 + (U * self.dt) - (self.stdev * np.sqrt(self.dt))
+
+    @abstractmethod
+    def build(self):
+        pass
+
+
+class HullWhiteEuropeanModel(HullWhite):
+
+    def build(self):
+        if self.s0 is None:
+            self.s0 = self.stock_prices['Close'][self.n_training]
+        self.compute_factors()
+        self.binomial = EuropeanVanillaModel(
+            self.s0, self.K, self.T, self.dt, self.u, self.d, self.r, self.n_steps, self.option)
+
+    def price(self):
+        return self.binomial.price()
+
+
+class HullWhiteAmericanModel(HullWhite):
+    def build(self):
+        if self.s0 is None:
+            self.s0 = self.stock_prices['Close'][self.n_training]
+        self.compute_factors()
+        self.binomial = AmericanModel(
+            self.s0, self.K, self.T, self.dt, self.u, self.d, self.r, self.n_steps, self.option)
+
+    def price(self):
+        return self.binomial.price()
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
