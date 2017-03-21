@@ -15,13 +15,13 @@ After installing Anaconda using the above guide, you should have no issues viewi
 
 Anaconda installs Python 3, Jupyter Notebook, and lots of other useful open source Data Science packages.
 
-<h3>Running Jupyter Notebook</h3>
+<h3>Running Jupyter Notebooks</h3>
 
-If you have Jupyter installed you can look at the notebook example with:
+If you have Jupyter installed you can look at the notebooks with:
 
 `jupyter notebook`
 
-then open binomial.ipynb
+then open binomial.ipynb or model_calibration.ipynb
 
 or just look at the output on github
 
