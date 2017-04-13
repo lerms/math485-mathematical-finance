@@ -84,13 +84,13 @@ figure('Name', 'volatility vs call price')
 plot(calls, sigma)
 title('volatility vs call price');
 xlabel('call price');
-ylabel('maturity');
+ylabel('volatility');
 
 figure('Name', 'volatility vs put price')
 plot(puts, sigma)
 title('volatility vs put price');
 xlabel('put price');
-ylabel('maturity');
+ylabel('volatility');
 
 
 % (d) Fix K = 120, T = 2, ? = 0.25, and vary the interest rate r ? [0.01,

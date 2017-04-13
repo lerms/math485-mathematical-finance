@@ -44,18 +44,31 @@ s0 = 100;
 K = 100;
 T = 1;
 N = [100, 500, 1000, 10000];
-mc_results = containers.Map('keyType','uint32','valueType','Any');
-[bs_call] = black_scholes(s0, T, K, r, sigma);
 
 disp('Price of European call using explicit B-S formula')
+[bs_call] = black_scholes(s0, T, K, r, sigma);
 bs_call
 
+errors = NaN([1, length(N)]);
+mc_results = NaN([1, length(N)]);
+i = 1;
 for n = N    
     fprintf('Price of European call using MC Simulation for n = %.0f', n)
     dt = 1 / n;
-    mc_results(n) = monte_carlo(s0, dt, K, r, sigma, n);
-    mc_results(n)
+    mc_results(i) = monte_carlo(s0, dt, K, r, sigma, n);
+    errors(i) = abs(mc_results(i) - bs_call) / bs_call;
+    mc_results(i)
+    i = i + 1;
 end
+
+figure('Name', 'error vs N');
+plot(N, errors)
+title('error vs N');
+xlabel('N');
+ylabel('percent error');
+
+
+
 
 % (b) Consider the option VT = (180ST ? ST2 ? 7200)+ =
 % max(0, 180ST ? ST2 ? 7200). Find the price of this option by MC
